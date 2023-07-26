@@ -1,173 +1,127 @@
 #include "parser.hpp"
+#include "lexer.hpp"
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 
-auto Parser::parse_object_field() -> std::pair<std::string, Node>
+auto Parser::parse() -> std::unique_ptr<ast::Node>
 {
-    auto key = lexer.next();
-    switch (key.type) {
-        case TokenType::String: {
-            auto colon = lexer.next();
-            if (colon.type != TokenType::Colon) {
-                throw UnexpectedToken("NOT :", "object field");
-            };
-            auto value = Parser::parse();
-
-            std::string key_node = parse_value(key);
-            auto pair = std::make_pair(key_node, value);
-            return { pair };
-        }
-        case TokenType::RBrace:
-            throw UnexpectedToken("}", "object field");
-        case TokenType::LBrace:
-            throw UnexpectedToken("{", "object field");
-        case TokenType::RBracket:
-            throw UnexpectedToken("]", "object field");
-        case TokenType::LBracket:
-            throw UnexpectedToken("[", "object field");
-        case TokenType::Int:
-            throw UnexpectedToken("int", "object field");
-        case TokenType::Decimal:
-            throw UnexpectedToken("decimal", "object field");
-        case TokenType::Colon:
-            throw UnexpectedToken(":", "object field");
-        case TokenType::Comma:
-            throw UnexpectedToken(",", "object field");
-        case TokenType::True:
-            throw UnexpectedToken("true", "object field");
-        case TokenType::False:
-            throw UnexpectedToken("false", "object field");
+    switch (current.type) {
         case TokenType::Null:
-            throw UnexpectedToken("null", "object field");
-        case TokenType::Eof:
-            throw UnexpectedToken("EOF", "object field");
-        case TokenType::Error:
-            throw UnexpectedToken("Error", "object field");
-        case TokenType::Id:
-            throw UnexpectedToken("Id", "object field");
-            break;
+            return parse_null();
+        case TokenType::False:
+        case TokenType::True:
+            return parse_bool();
+        case TokenType::Int:
+            return parse_int();
+        case TokenType::Decimal:
+            return parse_decimal();
+        case TokenType::String:
+            return parse_string();
+        case TokenType::LBracket:
+            return parse_array();
+        case TokenType::LBrace:
+            return parse_object();
+        default:
+            return (add_unexpected_error("value"), step(), std::make_unique<ast::Error>());
     }
 }
 
-auto Parser::parse_object() -> Node
+auto Parser::parse_null() noexcept -> std::unique_ptr<ast::Node>
 {
-    // current = {
-    auto map = std::unordered_map<std::string, Node> {};
-    while (true) {
-        auto next_field = parse_object_field();
-        auto key = next_field.first;
-        auto value = next_field.second;
-        map.emplace(key, value);
+    step();
+    return std::make_unique<ast::Null>();
+}
 
-        auto next_token = lexer.next();
-        if (next_token.type == TokenType::RBrace) {
+auto Parser::parse_bool() noexcept -> std::unique_ptr<ast::Node>
+{
+    auto value = current.type == TokenType::True;
+    step();
+    return std::make_unique<ast::Bool>(value);
+}
+
+auto Parser::parse_int() noexcept -> std::unique_ptr<ast::Node>
+{
+    auto value = std::stoll(this->current.value(this->text));
+    step();
+    return std::make_unique<ast::Int>(value);
+}
+
+auto Parser::parse_decimal() noexcept -> std::unique_ptr<ast::Node>
+{
+    auto value = std::stod(this->current.value(this->text));
+    step();
+    return std::make_unique<ast::Decimal>(value);
+}
+
+auto Parser::parse_string() noexcept -> std::unique_ptr<ast::Node>
+{
+
+    auto value = string_literal_value(this->current);
+    step();
+    return std::make_unique<ast::String>(std::move(value));
+}
+
+auto Parser::parse_array() -> std::unique_ptr<ast::Node>
+{
+    auto array = std::vector<std::unique_ptr<ast::Node>> {};
+    while (not done()) {
+        array.emplace_back(parse());
+
+        if (current.type == TokenType::RBracket) {
             break;
         }
-        if (next_token.type != TokenType::Comma) {
-            throw UnexpectedToken("NOT ,", "object");
+        if (current.type != TokenType::Comma) {
+            add_unexpected_error("','");
         }
+        step();
     }
-    return { NodeType::Object, NodeVariantType { map } };
-};
+    if (current.type != TokenType::RBracket) {
+        add_unexpected_error("']'");
+    }
+    step();
+    return std::make_unique<ast::Array>(std::move(array));
+}
 
-auto Parser::parse_array() -> Node
+auto Parser::parse_object() -> std::unique_ptr<ast::Node>
 {
-    // current = [
-    auto array = std::vector<Node> {};
-    while (true) {
-        auto next = parse();
-        array.emplace_back(next);
-
-        auto next_token = lexer.next();
-        if (next_token.type == TokenType::RBracket) {
+    step();
+    auto fields = std::unordered_map<std::string, std::unique_ptr<ast::Node>> {};
+    while (not done()) {
+        if (current.type != TokenType::String) {
+            add_unexpected_error("String or '}'");
+            while (not done() and this->current.type != TokenType::String
+                   and this->current.type != TokenType::LBrace) {
+                step();
+            }
+            continue;
+        }
+        auto key = string_literal_value(this->current);
+        step();
+        if (current.type != TokenType::Colon) {
+            add_unexpected_error("':'");
+        }
+        else {
+            step();
+        }
+        auto value = parse();
+        fields.emplace(key, value);
+        if (current.type == TokenType::RBrace) {
             break;
         }
-        if (next_token.type != TokenType::Comma) {
-            throw UnexpectedToken("NOT ,", "array");
+        if (current.type != TokenType::Comma) {
+            add_unexpected_error("','");
+        }
+        else {
+            step();
         }
     }
-    return { NodeType::Array, NodeVariantType { array } };
-};
-auto Parser::parse_value(Token token) -> Node
-{
-    switch (token.type) {
-        case TokenType::Int: {
-            int64_t integer = std::stoi(token.value(this->text));
-            return { NodeType::Int, NodeVariantType { integer } };
-        }
-        case TokenType::Decimal: {
-            double decimal = std::stod(token.value(this->text));
-            return { NodeType::Double, NodeVariantType { decimal } };
-        }
-        case TokenType::String: {
-            auto string_text = text.substr(token.pos.index + 1, token.length - 2);
-            return { NodeType::String, NodeVariantType { string_text } };
-        }
-        case TokenType::True: {
-            return { NodeType::Bool, NodeVariantType { true } };
-        }
-        case TokenType::False: {
-            return { NodeType::Bool, NodeVariantType { false } };
-        }
-        case TokenType::Null: {
-            return { NodeType::Null, NodeVariantType { nullptr } };
-        }
-
-        case TokenType::Colon:
-            throw UnexpectedToken(":", "value");
-        case TokenType::Comma:
-            throw UnexpectedToken(",", "value");
-        case TokenType::Eof:
-            throw UnexpectedToken("EOF", "value");
-        case TokenType::RBrace:
-            throw UnexpectedToken("{", "value");
-        case TokenType::LBrace:
-            throw UnexpectedToken("}", "value");
-        case TokenType::RBracket:
-            throw UnexpectedToken("[", "value");
-        case TokenType::LBracket:
-            throw UnexpectedToken("]", "value");
-        case TokenType::Error:
-            throw UnexpectedToken("Error", "value");
-        case TokenType::Id:
-            throw UnexpectedToken("Id", "value");
-            break;
+    if (current.type != TokenType::RBrace) {
+        add_unexpected_error("'}'");
     }
-};
-
-auto Parser::parse() -> Node
-{
-    auto next = lexer.next();
-
-    switch (next.type) {
-        case TokenType::LBrace:
-            return parse_object();
-        case TokenType::RBrace:
-            throw UnexpectedToken("}", "top-level");
-        case TokenType::LBracket:
-            return parse_array();
-        case TokenType::RBracket:
-            throw UnexpectedToken("]", "top-level");
-        case TokenType::Int:
-        case TokenType::True:
-        case TokenType::False:
-        case TokenType::Decimal:
-        case TokenType::String:
-        case TokenType::Null:
-            return parse_value(next);
-        case TokenType::Colon:
-            throw UnexpectedToken(":", "top-level");
-        case TokenType::Comma:
-            throw UnexpectedToken(",", "top-level");
-        case TokenType::Eof:
-            return { NodeType::Null, NodeVariantType { nullptr } };
-        case TokenType::Error:
-            throw UnexpectedToken("Error", "value");
-        case TokenType::Id:
-            throw UnexpectedToken("Id", "value");
-            break;
-    }
+    step();
+    return std::make_unique<ast::Object>(std::move(fields));
 };

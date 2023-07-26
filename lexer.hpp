@@ -28,6 +28,9 @@ enum class TokenType {
     Comma,
 };
 
+auto token_type_to_string(TokenType type) noexcept -> std::string_view;
+auto token_type_value(TokenType type) noexcept -> std::string_view;
+
 struct Token {
     TokenType type;
     Position pos;
@@ -37,19 +40,18 @@ struct Token {
     {
         return pos.value(text, this->length);
     }
+
+    constexpr auto to_string(std::string_view text) const noexcept -> std::string
+    {
+        return std::format("Token({}, \"{}\")",
+            token_type_to_string(this->type),
+            this->pos.value(text, this->length));
+    }
 };
 
 auto keyword_token_type(std::string& value) noexcept -> TokenType;
 
 class Lexer {
-private:
-    std::string_view text;
-    ErrorCollector* errors;
-
-    size_t index = 0;
-    size_t line = 1;
-    size_t column = 1;
-
 public:
     Lexer(std::string_view text, ErrorCollector* errors)
         : text(text)
@@ -96,4 +98,11 @@ private:
     constexpr auto done() const noexcept -> bool { return this->index >= this->text.length(); }
 
     constexpr auto current() const noexcept -> char { return this->text.at(this->index); }
+
+    std::string_view text;
+    ErrorCollector* errors;
+
+    size_t index = 0;
+    size_t line = 1;
+    size_t column = 1;
 };

@@ -3,6 +3,68 @@
 #include <format>
 #include <iostream>
 
+auto token_type_to_string(TokenType type) noexcept -> std::string_view
+{
+    switch (type) {
+        case TokenType::Eof:
+            return "Eof";
+        case TokenType::Error:
+            return "Error";
+        case TokenType::Id:
+            return "Id";
+        case TokenType::Int:
+            return "Int";
+        case TokenType::Decimal:
+            return "Decimal";
+        case TokenType::String:
+            return "String";
+        case TokenType::True:
+            return "True";
+        case TokenType::False:
+            return "False";
+        case TokenType::Null:
+            return "Null";
+        case TokenType::RBrace:
+            return "RBrace";
+        case TokenType::LBrace:
+            return "LBrace";
+        case TokenType::RBracket:
+            return "RBracket";
+        case TokenType::LBracket:
+            return "LBracket";
+        case TokenType::Colon:
+            return "Colon";
+        case TokenType::Comma:
+            return "Comma";
+    }
+}
+
+auto token_type_value(TokenType type) noexcept -> std::string_view
+{
+    switch (type) {
+        case TokenType::True:
+            return "'true'";
+        case TokenType::False:
+            return "'false'";
+        case TokenType::Null:
+            return "'null'";
+        case TokenType::RBrace:
+            return "'{'";
+        case TokenType::LBrace:
+            return "'}'";
+        case TokenType::RBracket:
+            return "'['";
+        case TokenType::LBracket:
+            return "']'";
+        case TokenType::Colon:
+            return "','";
+        case TokenType::Comma:
+            return "'.'";
+        default:
+            return token_type_to_string(type);
+    }
+}
+
 static const std::unordered_map<std::string, TokenType> keyword_token_types = {
     { "null", TokenType::Null },
     { "false", TokenType::False },
@@ -84,6 +146,7 @@ auto Lexer::skip_comment() noexcept -> Token
                 depth += 1;
             }
             last = current();
+            step();
         }
         if (depth > 0) {
             this->errors->add({ pos, "malformed multiline comment" });
